@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client"
+  output   = "./generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Run {
+  id         String    @id @default(uuid()) @db.Uuid
+  workflowId String    @map("workflow_id")
+  trigger    String
+  status     String
+  input      Json      @db.JsonB
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  startedAt  DateTime? @map("started_at") @db.Timestamptz
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz
+  error      Json?     @db.JsonB
+
+  steps     RunStep[]
+  artifacts Artifact[]
+
+  @@map("runs")
+}
+
+model RunStep {
+  id         String    @id @default(uuid()) @db.Uuid
+  runId      String    @map("run_id") @db.Uuid
+  name       String
+  status     String
+  startedAt  DateTime? @map("started_at") @db.Timestamptz
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz
+  error      Json?     @db.JsonB
+
+  run       Run        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  artifacts Artifact[]
+
+  @@index([runId])
+  @@map("run_steps")
+}
+
+model Artifact {
+  id        String   @id @default(uuid()) @db.Uuid
+  runId     String   @map("run_id") @db.Uuid
+  stepId    String?  @map("step_id") @db.Uuid
+  kind      String
+  payload   Json     @db.JsonB
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  run  Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  step RunStep? @relation(fields: [stepId], references: [id], onDelete: SetNull)
+
+  @@index([runId])
+  @@map("artifacts")
+}

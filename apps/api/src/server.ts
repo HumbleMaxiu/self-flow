@@ -1,9 +1,8 @@
 import Fastify from "fastify";
 import { z } from "zod";
 
-import { ensureDbSchema } from "@self-flow/shared";
+import { prisma } from "@self-flow/shared";
 
-import { dbPool } from "./services/db";
 import { registerRoutes } from "./routes";
 
 const EnvSchema = z.object({
@@ -18,6 +17,9 @@ const server = Fastify({
 
 await registerRoutes(server);
 
-await ensureDbSchema(dbPool);
+await prisma.$connect();
+server.addHook("onClose", async () => {
+  await prisma.$disconnect();
+});
 
 await server.listen({ port: env.PORT, host: "0.0.0.0" });

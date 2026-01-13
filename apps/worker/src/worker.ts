@@ -3,12 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Worker } from "bullmq";
 import { z } from "zod";
 
-import {
-  createDbPool,
-  ensureDbSchema,
-  getRedisConnection,
-  getRuntimeEnv
-} from "@self-flow/shared";
+import { Prisma, getRedisConnection, getRuntimeEnv, prisma } from "@self-flow/shared";
 
 const RuntimeWorkerEnvSchema = z.object({
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5)
@@ -17,9 +12,7 @@ const RuntimeWorkerEnvSchema = z.object({
 const runtimeEnv = getRuntimeEnv();
 const workerEnv = RuntimeWorkerEnvSchema.parse(process.env);
 
-const dbPool = createDbPool(runtimeEnv.DATABASE_URL);
-
-await ensureDbSchema(dbPool);
+await prisma.$connect();
 
 const JobDataSchema = z.object({
   runId: z.string().uuid()
@@ -30,76 +23,68 @@ const worker = new Worker(
   async (job) => {
     const { runId } = JobDataSchema.parse(job.data);
 
-    const runRes = await dbPool.query(
-      `SELECT status FROM runs WHERE id = $1`,
-      [runId]
-    );
-    if (runRes.rowCount === 0) {
+    const run = await prisma.run.findUnique({
+      where: { id: runId },
+      select: { status: true, startedAt: true }
+    });
+    if (!run) {
       throw new Error("Run not found");
     }
-    if (runRes.rows[0]?.status === "succeeded") {
+    if (run.status === "succeeded") {
       return { skipped: true };
     }
 
-    await dbPool.query(
-      `
-        UPDATE runs
-        SET status = 'running',
-            started_at = COALESCE(started_at, now()),
-            error = NULL
-        WHERE id = $1
-      `,
-      [runId]
-    );
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        status: "running",
+        startedAt: run.startedAt ?? new Date(),
+        error: Prisma.DbNull
+      }
+    });
 
     const stepId = randomUUID();
-    await dbPool.query(
-      `
-        INSERT INTO run_steps (id, run_id, name, status, started_at)
-        VALUES ($1, $2, $3, $4, now())
-      `,
-      [stepId, runId, "noop.execute", "running"]
-    );
+    await prisma.runStep.create({
+      data: {
+        id: stepId,
+        runId,
+        name: "noop.execute",
+        status: "running",
+        startedAt: new Date()
+      }
+    });
 
     const artifactId = randomUUID();
-    await dbPool.query(
-      `
-        INSERT INTO artifacts (id, run_id, step_id, kind, payload)
-        VALUES ($1, $2, $3, $4, $5::jsonb)
-      `,
-      [
-        artifactId,
+    await prisma.artifact.create({
+      data: {
+        id: artifactId,
         runId,
         stepId,
-        "worker_log",
-        JSON.stringify({
+        kind: "worker_log",
+        payload: {
           message: "M1 noop execution completed",
           attempt: job.attemptsMade + 1
-        })
-      ]
-    );
+        }
+      }
+    });
 
-    await dbPool.query(
-      `
-        UPDATE run_steps
-        SET status = 'succeeded',
-            finished_at = now(),
-            error = NULL
-        WHERE id = $1
-      `,
-      [stepId]
-    );
+    await prisma.runStep.update({
+      where: { id: stepId },
+      data: {
+        status: "succeeded",
+        finishedAt: new Date(),
+        error: Prisma.DbNull
+      }
+    });
 
-    await dbPool.query(
-      `
-        UPDATE runs
-        SET status = 'succeeded',
-            finished_at = now(),
-            error = NULL
-        WHERE id = $1
-      `,
-      [runId]
-    );
+    await prisma.run.update({
+      where: { id: runId },
+      data: {
+        status: "succeeded",
+        finishedAt: new Date(),
+        error: Prisma.DbNull
+      }
+    });
 
     return { ok: true };
   },
@@ -113,23 +98,18 @@ worker.on("failed", async (job, err) => {
   const parsed = JobDataSchema.safeParse(job?.data);
   if (!parsed.success) return;
 
-  await dbPool.query(
-    `
-      UPDATE runs
-      SET status = 'failed',
-          finished_at = now(),
-          error = $2::jsonb
-      WHERE id = $1
-    `,
-    [
-      parsed.data.runId,
-      JSON.stringify({
-        message: err.message,
-        name: err.name
-      })
-    ]
-  );
+  try {
+    await prisma.run.update({
+      where: { id: parsed.data.runId },
+      data: {
+        status: "failed",
+        finishedAt: new Date(),
+        error: { message: err.message, name: err.name }
+      }
+    });
+  } catch {
+    return;
+  }
 });
 
 await worker.waitUntilReady();
-
