@@ -215,6 +215,11 @@ RSS→偏好总结→Notion 入库将作为最小可用工作流模板，用于�
 - 代码质量：ESLint + Prettier，类型检查 TypeScript project references
 - 测试：Vitest（单元/集成），Playwright（E2E，后续）
 
+### 7.2.2 TypeScript 类型组织（约定）
+- 跨包共享类型统一收敛到 `packages/shared`
+- 领域类型使用命名空间分组（例如 `SelfFlow.Runs.*`），避免散落在各个服务文件
+- `apps/` 内仅保留“本地私有类型”，禁止复制粘贴跨域类型
+
 ### 7.2.1 Monorepo 目录规划（建议）
 - apps/
   - console：Web 控制台（手动触发、配置、Run 追溯）

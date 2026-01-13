@@ -3,7 +3,13 @@ import { randomUUID } from "node:crypto";
 import { Queue } from "bullmq";
 import { z } from "zod";
 
-import { Prisma, getRedisConnection, getRuntimeEnv, prisma } from "@self-flow/shared";
+import {
+  Prisma,
+  SelfFlow,
+  getRedisConnection,
+  getRuntimeEnv,
+  prisma
+} from "@self-flow/shared";
 
 const RunCreateInputSchema = z.object({
   workflowId: z.string().min(1),
@@ -11,44 +17,10 @@ const RunCreateInputSchema = z.object({
   input: z.record(z.string(), z.unknown())
 });
 
-export type RunCreateInput = z.infer<typeof RunCreateInputSchema>;
+export type RunCreateInput = SelfFlow.Runs.CreateInput;
 
 const env = getRuntimeEnv();
 const runsQueue = new Queue("runs", { connection: getRedisConnection(env) });
-
-type RunListModel = {
-  id: string;
-  workflowId: string;
-  trigger: string;
-  status: string;
-  createdAt: Date;
-  startedAt: Date | null;
-  finishedAt: Date | null;
-};
-
-type RunModel = RunListModel & {
-  input: unknown;
-  error: unknown | null;
-};
-
-type RunStepModel = {
-  id: string;
-  runId: string;
-  name: string;
-  status: string;
-  startedAt: Date | null;
-  finishedAt: Date | null;
-  error: unknown | null;
-};
-
-type ArtifactModel = {
-  id: string;
-  runId: string;
-  stepId: string | null;
-  kind: string;
-  payload: unknown;
-  createdAt: Date;
-};
 
 export async function createRun(input: RunCreateInput) {
   const parsed = RunCreateInputSchema.parse(input);
@@ -95,7 +67,7 @@ export async function listRuns() {
     take: 50
   });
 
-  return (runs as RunListModel[]).map((run: RunListModel) => ({
+  return runs.map((run) => ({
     id: run.id,
     workflow_id: run.workflowId,
     trigger: run.trigger,
@@ -103,7 +75,7 @@ export async function listRuns() {
     created_at: run.createdAt,
     started_at: run.startedAt,
     finished_at: run.finishedAt
-  }));
+  })) satisfies SelfFlow.Runs.ListRow[];
 }
 
 export async function getRun(id: string) {
@@ -151,7 +123,7 @@ export async function getRun(id: string) {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }]
   });
 
-  const sortedSteps = (steps as RunStepModel[]).slice().sort((a: RunStepModel, b: RunStepModel) => {
+  const sortedSteps = steps.slice().sort((a, b) => {
     if (!a.startedAt && !b.startedAt) return a.id.localeCompare(b.id);
     if (!a.startedAt) return 1;
     if (!b.startedAt) return -1;
@@ -162,17 +134,17 @@ export async function getRun(id: string) {
 
   return {
     run: {
-      id: (run as RunModel).id,
-      workflow_id: (run as RunModel).workflowId,
-      trigger: (run as RunModel).trigger,
-      status: (run as RunModel).status,
-      input: (run as RunModel).input,
-      created_at: (run as RunModel).createdAt,
-      started_at: (run as RunModel).startedAt,
-      finished_at: (run as RunModel).finishedAt,
-      error: (run as RunModel).error
+      id: run.id,
+      workflow_id: run.workflowId,
+      trigger: run.trigger,
+      status: run.status,
+      input: run.input,
+      created_at: run.createdAt,
+      started_at: run.startedAt,
+      finished_at: run.finishedAt,
+      error: run.error
     },
-    steps: sortedSteps.map((step: RunStepModel) => ({
+    steps: sortedSteps.map((step) => ({
       id: step.id,
       run_id: step.runId,
       name: step.name,
@@ -181,7 +153,7 @@ export async function getRun(id: string) {
       finished_at: step.finishedAt,
       error: step.error
     })),
-    artifacts: (artifacts as ArtifactModel[]).map((artifact: ArtifactModel) => ({
+    artifacts: artifacts.map((artifact) => ({
       id: artifact.id,
       run_id: artifact.runId,
       step_id: artifact.stepId,
@@ -189,5 +161,5 @@ export async function getRun(id: string) {
       payload: artifact.payload,
       created_at: artifact.createdAt
     }))
-  };
+  } satisfies SelfFlow.Runs.GetResult;
 }
