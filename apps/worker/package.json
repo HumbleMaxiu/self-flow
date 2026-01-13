@@ -3,9 +3,17 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "tsx watch src/worker.ts",
+    "start": "tsx src/worker.ts",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@self-flow/shared": "workspace:^",
+    "bullmq": "^5.66.5",
+    "ioredis": "^5.9.1",
+    "pg": "^8.16.3",
+    "zod": "^4.3.5"
   }
 }
-
